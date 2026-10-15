@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AssistantMessageComponent, UserMessageComponent } from "@earendil-works/pi-coding-agent";
-import { Markdown, Text, type TUI } from "@earendil-works/pi-tui";
+import { Markdown, Text, stripTerminalSequences, type TUI } from "@earendil-works/pi-tui";
 import { installCodeblockCopy } from "../src/pi-compat.ts";
 import { fixture, flush, response } from "./harness.ts";
+import { theme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 
 test("only the six button cells copy, not adjacent cells or literal [Copy] in code", async () => {
   const f = fixture("```txt\nliteral [Copy]\n```");
@@ -64,22 +65,22 @@ test("source/native parser disagreement never guesses a block", () => {
 });
 
 test("shutdown leaves later wrappers intact; duplicate and unsupported installs fail closed", () => {
-  assert.equal(installCodeblockCopy({ mode: "fullscreen" } as TUI, () => {}), undefined);
+  assert.equal(installCodeblockCopy({ mode: "fullscreen" } as TUI, () => {}, () => theme), undefined);
   const native = Markdown.prototype.render;
   const f = fixture("```txt\ncode\n```");
   const ours = Markdown.prototype.render;
   const later: typeof native = function (this: Markdown, width) { return ours.call(this, width); };
   try {
-    assert.equal(installCodeblockCopy(f.tui, () => {}), undefined);
+    assert.equal(installCodeblockCopy(f.tui, () => {}, () => theme), undefined);
     Markdown.prototype.render = later;
     f.controller!.dispose(); assert.equal(Markdown.prototype.render, later);
     f.frame(); assert.equal(f.buttons().length, 0);
-    const again = installCodeblockCopy(f.tui, () => {});
+    const again = installCodeblockCopy(f.tui, () => {}, () => theme);
     assert.ok(again); f.frame(); assert.equal(f.buttons().length, 1); again.dispose();
   } finally { Markdown.prototype.render = native; f.dispose(); }
 });
 
-test("plain text, links, code body and existing image protocol rows are unchanged", () => {
+test("plain text, links and image protocol rows outside cards are unchanged", () => {
   const image = "\x1b_Gi=123,a=p;AAAA\x1b\\";
   const source = "[link](https://example.com)\n\n```txt\n  body\n```";
   const build = () => new UserMessageComponent(source, undefined, 1, [(text) => text + "\n\n" + image]);
@@ -89,6 +90,13 @@ test("plain text, links, code body and existing image protocol rows are unchange
     const actual = f.frame(), expected = baseline.frame();
     assert.equal(actual.length, expected.length);
     assert.ok(expected.some((line) => line.includes(image)));
-    for (let row = 0; row < actual.length; row++) if (!actual[row].includes("[Copy]")) assert.equal(actual[row], expected[row]);
+    const plain = expected.map(stripTerminalSequences);
+    const top = plain.findIndex((line) => line.trim() === "```txt");
+    const bottom = plain.findIndex((line) => line.trim() === "```");
+    assert.ok(top >= 0 && bottom > top);
+    for (let row = 0; row < actual.length; row++) {
+      if (row < top || row > bottom) assert.equal(actual[row], expected[row]);
+      else if (row > top && row < bottom) assert.equal(stripTerminalSequences(actual[row]), plain[row]);
+    }
   } finally { baseline.dispose(); f.dispose(); }
 });

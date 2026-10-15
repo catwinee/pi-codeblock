@@ -17,9 +17,10 @@ This independent extension adapts the code-block copy approach from [pi-pretty-t
 
 ## Local implementation
 
-- Preserve Pi's existing code rendering; only add `[Copy]` to its header.
+- Reuse Pi's code highlighting in compact theme-colored cards, with a language title and `[Copy]` instead of display fences. Card layout is a local implementation in `src/card.ts`.
 - Parse code before Pi's display-only tab expansion and validate against the code tokens Pi actually renders.
-- Use temporary zero-width markers to locate button geometry after native nesting and wrapping; remove every marker before returning/caching output.
+- Use temporary zero-width markers to locate button geometry and card row spans after native nesting and wrapping; remove every marker before returning/caching output.
+- Paint only code spans using the public native compositor, restoring surrounding styles. No additional Pi prototype hooks are needed for cards.
 - Respect native drag detection instead of patching fullscreen selection semantics.
 - Provide `/codeblock` as a keyboard fallback using the active, compaction-aware branch.
 

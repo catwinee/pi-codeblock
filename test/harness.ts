@@ -1,7 +1,7 @@
 import { AssistantMessageComponent, UserMessageComponent } from "@earendil-works/pi-coding-agent";
 import { Container, ScrollView, VStack, TuiAltScreen, truncateToWidth, stripTerminalSequences, visibleWidth,
   type Component, type Terminal } from "@earendil-works/pi-tui";
-import { initTheme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
+import { initTheme, theme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { installCodeblockCopy } from "../src/pi-compat.ts";
 
 class MemoryTerminal implements Terminal {
@@ -19,8 +19,8 @@ export function response(text: string) {
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
 }
 export function fixture(text: string, options: { role?: "user" | "assistant"; width?: number; copy?: (text: string) => Promise<boolean | string>;
-  build?: (message: Component) => Component; install?: boolean } = {}) {
-  initTheme("dark", false);
+  build?: (message: Component) => Component; install?: boolean; theme?: string } = {}) {
+  initTheme(options.theme ?? "dark", false);
   const terminal = new MemoryTerminal(); terminal.columns = options.width ?? 64;
   const copies: string[] = [], errors: string[] = [];
   const tui = new TuiAltScreen(terminal, false, undefined, { mouse: true, copyOnSelect: false,
@@ -31,9 +31,10 @@ export function fixture(text: string, options: { role?: "user" | "assistant"; wi
   const editor = { focused: false, draft: "draft 未发送", render: (width: number) => [truncateToWidth("INPUT: " + editor.draft, width)],
     invalidate() {}, handleInput: (data: string) => { editor.draft += data; } };
   tui.setLayoutRoot(new VStack([{ component: scroll, basis: 0, grow: 1 }, editor])); tui.setFocus(editor);
-  const controller = options.install === false ? undefined : installCodeblockCopy(tui, (message) => errors.push(message));
+  const controller = options.install === false ? undefined : installCodeblockCopy(tui, (message) => errors.push(message), () => theme);
   if (options.install !== false && !controller) throw new Error("Unsupported Pi renderer");
-  tui.start(); scroll.scrollTo(0, { disableFollow: true }); tui.renderNow();
+  try { tui.start(); scroll.scrollTo(0, { disableFollow: true }); tui.renderNow(); }
+  catch (error) { controller?.dispose(); tui.stop({ preserveScreen: true }); throw error; }
   const frame = () => { tui.renderNow(); return tui.getScreenLines(); };
   const buttons = () => frame().flatMap((line, y) => {
     const plain = stripTerminalSequences(line), offset = plain.indexOf("[Copy]");

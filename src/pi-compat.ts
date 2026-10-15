@@ -1,20 +1,23 @@
 /** Pi 1.2 compatibility boundary. Code-copy design adapted from pi-pretty-tui (MIT); see UPSTREAM.md. */
 import { randomUUID } from "node:crypto";
 import { AssistantMessageComponent, UserMessageComponent } from "@earendil-works/pi-coding-agent";
-import { Markdown, truncateToWidth, visibleWidth, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import { Markdown, compositeTuiLine, sliceByColumn, stripTerminalSequences, visibleWidth, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { codeBlocks, type CodeBlock } from "./source.ts";
+import { paintCardLine, renderCard, type CardTheme } from "./card.ts";
 
 // Dynamic signatures are confined here: Pi does not expose code-token render hooks.
 type Fn = (this: any, ...args: any[]) => any;
 type ObjectRecord = Record<string, any>;
 interface Region { x: number; end: number; y: number; code: string }
 interface State { lines: string[]; text: string; width: number; frame: number; regions: Region[]; press?: Region }
-interface Build { blocks: CodeBlock[]; seen: number; valid: boolean; buttons: Map<number, string> }
+interface CardRow { width: number; background: string }
+interface Build { blocks: CodeBlock[]; seen: number; valid: boolean; buttons: Map<number, string>; rows: Map<number, CardRow> }
 function object(value: unknown): value is ObjectRecord { return typeof value === "object" && value !== null; }
 function lines(value: unknown): value is string[] { return Array.isArray(value) && value.every((s) => typeof s === "string"); }
 
 export interface CodeblockController { dispose(): void }
-export function installCodeblockCopy(tui: TUI, onError: (message: string) => void): CodeblockController | undefined {
+export function installCodeblockCopy(tui: TUI, onError: (message: string) => void,
+  getTheme: () => CardTheme): CodeblockController | undefined {
   if (tui.mode !== "fullscreen") return;
   const framePrototype = Reflect.getPrototypeOf(tui);
   const markdown = Markdown.prototype as unknown as ObjectRecord;
@@ -26,8 +29,8 @@ export function installCodeblockCopy(tui: TUI, onError: (message: string) => voi
     || [markdown.render, markdown.renderToken, markdown.invalidate, user.render, assistant.render].some((fn) => typeof fn !== "function")) return;
 
   const nonce = randomUUID();
-  const marker = (id: number, side: "s" | "e") => `\x1b]777;pi-codeblock=${nonce};${id};${side}\x07`;
-  const markerPattern = new RegExp(`\\x1b\\]777;pi-codeblock=${nonce};(\\d+);([se])\\x07`, "g");
+  const marker = (id: number, side: "s" | "e" | "b" | "f") => `\x1b]777;pi-codeblock=${nonce};${id};${side}\x07`;
+  const markerPattern = new RegExp(`\\x1b\\]777;pi-codeblock=${nonce};(\\d+);([sebf])\\x07`, "g");
   const buttonPattern = new RegExp(`\\x1b\\]777;pi-codeblock=${nonce};(\\d+);s\\x07[\\s\\S]*?\\x1b\\]777;pi-codeblock=${nonce};\\1;e\\x07`, "g");
   let alive = true, frameActive = false, messageDepth = 0, frameNumber = 0, rememberedSinceSweep = 0;
   const states = new WeakMap<object, State>();
@@ -106,7 +109,7 @@ export function installCodeblockCopy(tui: TUI, onError: (message: string) => voi
       }
       remember(this);
       originalInvalidate.call(this);
-      const build: Build = { blocks: [], seen: 0, valid: true, buttons: new Map() };
+      const build: Build = { blocks: [], seen: 0, valid: true, buttons: new Map(), rows: new Map() };
       const parse = (text: string) => {
         try { build.blocks = codeBlocks(text); } catch { build.blocks = []; build.valid = false; }
       };
@@ -115,8 +118,8 @@ export function installCodeblockCopy(tui: TUI, onError: (message: string) => voi
       const options = this.options;
       const transform = options.transform;
       // Observe the effective Markdown without calling image/other transformers twice.
-      const observed = typeof transform === "function" ? { ...options, transform: function (this: unknown, ...args: unknown[]) {
-        const result = Reflect.apply(transform, this, args);
+      const observed = typeof transform === "function" ? { ...options, transform: function (...args: unknown[]) {
+        const result = Reflect.apply(transform, options, args);
         parse(typeof result === "string" ? result : source);
         return result;
       } } : options;
@@ -129,21 +132,28 @@ export function installCodeblockCopy(tui: TUI, onError: (message: string) => voi
       const usable = build.valid && build.seen === build.blocks.length;
       const regions: Region[] = [];
       const cleaned = rendered.map((line, y) => {
-        if (usable) {
-          const starts = new Map<number, number>();
-          for (const match of line.matchAll(markerPattern)) {
-            const id = Number(match[1]), x = visibleWidth(line.slice(0, match.index));
-            if (match[2] === "s") starts.set(id, x);
-            else {
-              const start = starts.get(id), code = build.buttons.get(id);
-              if (start !== undefined && code !== undefined && x - start === 6 && x <= width) {
-                regions.push({ x: start, end: x, y, code });
-              }
+        const starts = new Map<string, number>();
+        const panels: (CardRow & { x: number })[] = [];
+        for (const match of line.matchAll(markerPattern)) {
+          const id = Number(match[1]), side = match[2], x = visibleWidth(line.slice(0, match.index));
+          if (side === "s" || side === "b") starts.set(side + id, x);
+          else if (side === "e" && usable) {
+            const start = starts.get("s" + id), code = build.buttons.get(id);
+            if (start !== undefined && code !== undefined && x - start === 6 && x <= width) {
+              regions.push({ x: start, end: x, y, code });
             }
+          } else if (side === "f") {
+            const start = starts.get("b" + id), row = build.rows.get(id);
+            if (start !== undefined && row && x - start === row.width && x <= width) panels.push({ ...row, x: start });
           }
         }
-        // No internal markers may reach the terminal, selections, or cached display rows.
-        return (usable ? line : line.replace(buttonPattern, "      ")).replace(markerPattern, "");
+        // Remove all internal markers before painting, caching, or exposing display rows.
+        let clean = (usable ? line : line.replace(buttonPattern, "      ")).replace(markerPattern, "");
+        for (const panel of panels) {
+          const part = sliceByColumn(clean, panel.x, panel.width, true);
+          clean = compositeTuiLine(clean, paintCardLine(part, panel.background), panel.x, panel.width, width);
+        }
+        return clean;
       });
       this.cachedLines = cleaned;
       states.set(this, { lines: cleaned, text: source, width, frame: frameNumber, regions });
@@ -155,13 +165,31 @@ export function installCodeblockCopy(tui: TUI, onError: (message: string) => voi
       if (!alive || !build || !object(token) || token.type !== "code") return rendered;
       const id = build.seen++, block = build.blocks[id];
       if (!block || typeof token.text !== "string" || block.code.replace(/\t/g, "   ") !== token.text) build.valid = false;
-      if (!build.valid || width < 12 || !Number.isInteger(width) || !lines(rendered) || !rendered.length
-        || !object(this.theme) || typeof this.theme.codeBlockBorder !== "function") return rendered;
-      const header = truncateToWidth(rendered[0], width - 7, "…");
-      const label = this.theme.codeBlockBorder("[Copy]");
-      if (typeof label !== "string" || visibleWidth(label) !== 6) return rendered;
-      build.buttons.set(id, block.code);
-      return [header + " ".repeat(width - 6 - visibleWidth(header)) + marker(id, "s") + label + marker(id, "e"), ...rendered.slice(1)];
+      if (!Number.isInteger(width) || width < 1 || !lines(rendered) || rendered.length < 2 || !object(this.theme)) return rendered;
+      // Pi 1.2 adds one opening/closing fence and, optionally, a following spacing row.
+      // Validate their exact positions: a literal fence inside the code is never removed.
+      const footer = rendered.length - 1 - (rest[0] && rest[0] !== "space" ? 1 : 0);
+      const indent = this.theme.codeBlockIndent ?? "  ";
+      if (typeof indent !== "string" || footer < 1
+        || stripTerminalSequences(rendered[0]) !== "```" + (token.lang || "")
+        || stripTerminalSequences(rendered[footer]) !== "```"
+        || rendered.some((line) => line.includes("\x1b_G") || line.includes("\x1b]1337;File="))) return rendered;
+      const body = rendered.slice(1, footer);
+      if (body.some((line) => !line.startsWith(indent))) return rendered;
+      const copy = build.valid && width >= 12 ? { start: marker(id, "s"), end: marker(id, "e") } : undefined;
+      try {
+        const card = renderCard(body.map((line) => line.slice(indent.length)), token.lang || "", width, getTheme(), copy);
+        const decorated = card.lines.map((line) => {
+          const row = build.rows.size;
+          build.rows.set(row, { width, background: card.background });
+          return marker(row, "b") + line + marker(row, "f");
+        });
+        if (copy) build.buttons.set(id, block.code);
+        return [...decorated, ...rendered.slice(footer + 1)];
+      } catch {
+        // An unsupported layout/theme keeps the native rendering and no guessed targets.
+        return rendered;
+      }
     });
     patch(markdown, "handleMouse", (original) => function (event: TuiMouseEvent) {
       const state = states.get(this);

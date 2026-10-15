@@ -1,7 +1,8 @@
 # pi-codeblock maintenance
 
 - Read README.md and UPSTREAM.md before changes. Retain the upstream MIT notice.
-- Scope: code-block copying only. Do not change body-text copying, editor keys, tool renderers, message layout, or installed Pi files.
+- Scope: code-block presentation and copying only. Do not change body-text copying, editor keys, tool renderers, surrounding message layout, or installed Pi files.
+- Keep card layout in src/card.ts and use public theme/width/compositing APIs. Resolve theme colors on rebuild; wrap before painting, preserve parent backgrounds and quote/list prefixes, and never rewrite image protocol rows.
 - Keep all private Pi access and runtime patches in src/pi-compat.ts. Validate structures and fail closed; remove only patches still owned by this extension.
 - Copy code data before display indentation, wrapping and syntax highlighting. Never trim code indentation or replace source tabs with display spaces.
 - Preserve drafts, native mouse selection, overlays, streaming, and image protocols. Do not send model requests or register tools.

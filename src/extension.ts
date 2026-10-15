@@ -15,7 +15,7 @@ export default function (pi: ExtensionAPI): void {
     let close: () => void = () => {};
     await ctx.ui.custom<void>((tui, _theme, _keys, done) => {
       close = () => done();
-      controller = installCodeblockCopy(tui, (message) => ctx.ui.notify(message, "warning"));
+      controller = installCodeblockCopy(tui, (message) => ctx.ui.notify(message, "warning"), () => ctx.ui.theme);
       if (tui.mode === "fullscreen" && !controller) ctx.ui.notify("pi-codeblock: unsupported renderer; use /codeblock instead.", "warning");
       return { render: () => [], invalidate() {} };
     }, { overlay: true, onHandle: () => close() });

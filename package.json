@@ -1,7 +1,7 @@
 {
   "name": "pi-codeblock",
   "version": "0.1.0",
-  "description": "Clickable Copy controls for code blocks in Pi's fullscreen transcript",
+  "description": "Theme-colored code cards with clickable Copy controls for Pi's fullscreen transcript",
   "type": "module",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/catwinee/pi-codeblock.git" },
