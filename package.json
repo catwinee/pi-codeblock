@@ -1,0 +1,28 @@
+{
+  "name": "pi-codeblock",
+  "version": "0.1.0",
+  "description": "Clickable Copy controls for code blocks in Pi's fullscreen transcript",
+  "type": "module",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/catwinee/pi-codeblock.git" },
+  "homepage": "https://github.com/catwinee/pi-codeblock#readme",
+  "bugs": { "url": "https://github.com/catwinee/pi-codeblock/issues" },
+  "keywords": ["pi-package", "pi-extension", "code-block", "clipboard"],
+  "files": ["src", "LICENSE", "README.md", "UPSTREAM.md", "VALIDATION.md"],
+  "pi": { "extensions": ["./src/extension.ts"] },
+  "engines": { "node": ">=22.19.0" },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "prepublishOnly": "npm run check && npm test"
+  },
+  "dependencies": { "marked": "18.0.11" },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*" },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@earendil-works/pi-tui": "1.2.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^6.0.3"
+  }
+}
